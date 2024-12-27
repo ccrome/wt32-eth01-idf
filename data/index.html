@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Web GUI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .button {
+            color: white;
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .button.on { background: #4CAF50; }
+        .button.off { background: #f44336; }
+        .sensor {
+            margin: 5px;
+            font-size: 1.2em;
+        }
+    </style>
+    <script>
+        // Turn Relay On or Off by ID
+        function setRelayState(id, state) {
+            fetch(`/relay?id=${id}&state=${state}`, { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById(`relayStatus${id}`).innerText = `Relay ${id}: ${data.state}`;
+                });
+        }
+
+        // Update Sensor Data
+        function updateSensors() {
+            fetch('/sensors')
+                .then(response => response.json())
+                .then(data => {
+                    for (let i = 0; i < data.sensors.length; i++) {
+                        document.getElementById(`sensor${i}`).innerText = `Sensor ${i}: ${data.sensors[i]}°C`;
+                    }
+                });
+        }
+
+        // Initialize Buttons and Sensors
+        document.addEventListener('DOMContentLoaded', () => {
+            const numButtons = 2; // Example N buttons
+            const numSensors = 2; // Example M sensors
+
+            const buttonContainer = document.getElementById('buttonContainer');
+            const sensorContainer = document.getElementById('sensorContainer');
+
+            // Generate Buttons
+            for (let i = 0; i < numButtons; i++) {
+                const btnOn = document.createElement('button');
+                btnOn.className = 'button on';
+                btnOn.innerText = `Relay ${i} ON`;
+                btnOn.onclick = () => setRelayState(i, 'on');
+                buttonContainer.appendChild(btnOn);
+
+                const btnOff = document.createElement('button');
+                btnOff.className = 'button off';
+                btnOff.innerText = `Relay ${i} OFF`;
+                btnOff.onclick = () => setRelayState(i, 'off');
+                buttonContainer.appendChild(btnOff);
+
+                const status = document.createElement('p');
+                status.id = `relayStatus${i}`;
+                status.innerText = `Relay ${i}: OFF`;
+                buttonContainer.appendChild(status);
+            }
+
+            // Generate Sensor Displays
+            for (let i = 0; i < numSensors; i++) {
+                const sensor = document.createElement('p');
+                sensor.className = 'sensor';
+                sensor.id = `sensor${i}`;
+                sensor.innerText = `Sensor ${i}: --°C`;
+                sensorContainer.appendChild(sensor);
+            }
+            updateSensors();
+            setInterval(updateSensors, 1000);
+        });
+    </script>
+</head>
+<body>
+    <h1>ESP32 Web GUI</h1>
+    <h2>Relays</h2>
+    <div id="buttonContainer"></div>
+    <h2>Sensors</h2>
+    <div id="sensorContainer"></div>
+</body>
+</html>

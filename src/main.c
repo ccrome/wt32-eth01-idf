@@ -1,141 +1,66 @@
 #include <string.h>
+#include "config.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "esp_netif.h"
-#include "esp_eth.h"
-#include "esp_http_server.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_netif.h"
+#include "esp_eth.h"
+#include "ethernet.h"
+#include "esp_spiffs.h"
 
-#define TAG "ETH_WEBSERVER"
+#include "relay.h"
+#include "server.h"
+#include "sensors.h"
 
+#define TAG "MAIN APP"
 
-// IO0 : rmii_emac_REF_CLK
-// IO13: rmii_emac_rx_er
-// IO21: RMII_EMAC_TX_EN                                                                                                                                                                     // IO19: RMII_EMAC_TXD0
-// IO22: RMII_EMAC_TXD1                                                                                                                                                                      // IO27: RMII_EMAC_CRS_DV
-// IO27:  MODE2 = CRS_DV/MODE2 = IO27
-// IO26:  MODE1 = RXD1/MODE1 = IO26
-// IO25: MODE0 = RXD0/MODE0 = IO25
-// io16: CLOCK_EN
-
-static esp_eth_handle_t eth_handle = NULL;
-
-/* HTTP GET handler */
-esp_err_t root_get_handler(httpd_req_t *req) {
-    const char resp[] = "Hello from WT32-ETH01 Web Server!";
-    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-    return ESP_OK;
-}
-
-/* URI handler structure */
-httpd_uri_t uri_get = {
-    .uri = "/",
-    .method = HTTP_GET,
-    .handler = root_get_handler,
-    .user_ctx = NULL
-};
-
-/* Start HTTP Server */
-httpd_handle_t start_webserver(void) {
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    httpd_handle_t server = NULL;
-
-    if (httpd_start(&server, &config) == ESP_OK) {
-        httpd_register_uri_handler(server, &uri_get);
-    } else {
-        ESP_LOGE(TAG, "Failed to start HTTP server");
-    }
-    return server;
-}
-
-/* Event handler for Ethernet */
-static void eth_event_handler(void *arg, esp_event_base_t event_base,
-                              int32_t event_id, void *event_data) {
-    switch (event_id) {
-        case ETHERNET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "Ethernet Connected");
-            break;
-        case ETHERNET_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "Ethernet Disconnected");
-            break;
-        case ETHERNET_EVENT_START:
-            ESP_LOGI(TAG, "Ethernet Started");
-            break;
-        case ETHERNET_EVENT_STOP:
-            ESP_LOGI(TAG, "Ethernet Stopped");
-            break;
-        default:
-            break;
-    }
-}
-
-/* IP event handler */
-static void ip_event_handler(void *arg, esp_event_base_t event_base,
-                             int32_t event_id, void *event_data) {
-    ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-    ESP_LOGI(TAG, "IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
-    start_webserver();
-}
-
-/* Initialize Ethernet */
-void init_ethernet(void) {
-    #define GPIO_PIN 16
-
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << GPIO_PIN), // Pin mask for GPIO16
-        .mode = GPIO_MODE_OUTPUT,          // Set as output
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,    // No interrupts
+void init_fs(void) {
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = "/www",
+        .partition_label = "storage",
+        .max_files = 5,
+        .format_if_mount_failed = false
     };
-    gpio_config(&io_conf);
-    gpio_set_level(GPIO_PIN, 1);
 
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
 
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mount SPIFFS (%s)", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "SPIFFS successfully mounted");
+    }
 
-    esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
-    esp_netif_t *eth_netif = esp_netif_new(&netif_config);
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(conf.partition_label, &total, &used);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "SPIFFS Total: %d, Used: %d", total, used);
+    } else {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition info (%s)", esp_err_to_name(ret));
+    }
 
-    // EMAC Configuration
-    eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-
-    // SMI GPIO Configuration
-    esp32_emac_config.smi_gpio.mdc_num = 23;   // MDC pin
-    esp32_emac_config.smi_gpio.mdio_num = 18;  // MDIO pin
-
-    // Clock Configuration
-    esp32_emac_config.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN; // External 50 MHz clock
-    esp32_emac_config.clock_config.rmii.clock_gpio = 0; // GPIO0 for external clock
-
-    // MAC and PHY Configurations
-    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
-    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
-
-    // PHY Settings
-    phy_config.phy_addr = 1;  // Default PHY address for LAN8720
-    phy_config.reset_gpio_num = -1; // No GPIO for reset, rely on hardware reset (RC filter)
-    phy_config.reset_timeout_ms = 1000;
-    phy_config.autonego_timeout_ms = 5000;
-
-    // Create MAC and PHY objects
-    esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
-    esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_config);
-
-    // Configure Ethernet driver
-    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
-    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_config, &eth_handle));
-
-    // Attach Ethernet driver to network interface
-    ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
-
-    // Start Ethernet driver
-    ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+    ret = esp_spiffs_check(conf.partition_label);
+    ESP_LOGE(TAG, "-----------------------");
+    switch (ret) {
+    case ESP_OK:
+        ESP_LOGE(TAG, "check ok!");
+	break;
+    case ESP_ERR_INVALID_STATE:
+        ESP_LOGE(TAG, "not mounted!");
+	break;
+    case ESP_FAIL:
+    default:
+        ESP_LOGE(TAG, "ANOTHER ERROR!");
+	break;
+    }
 }
 
 /* App Main */
 void app_main(void) {
+    relay_init();
+    init_fs();
+    sensors_init();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -145,9 +70,20 @@ void app_main(void) {
 
     // Initialize Ethernet
     init_ethernet();
-
+    TaskHandle_t sensor_task;
+    xTaskCreate(
+        SensorTask,    // Task function
+        "Sensors",      // Name of the task
+        2000,         // Stack size
+        NULL,             // Task parameters
+        1,                // Priority
+        &sensor_task           // Task handle (not used here)
+    );
     // Keep FreeRTOS Task Running
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
+//	ESP_LOGE(TAG, "Stack high water mark = %ld words, %ld bytes",
+//		 (long int)(uxTaskGetStackHighWaterMark(sensor_task)),
+//		 (long int)(uxTaskGetStackHighWaterMark(sensor_task)*4));
     }
 }
