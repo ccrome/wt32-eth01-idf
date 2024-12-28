@@ -13,7 +13,7 @@ on:
 jobs:
   build:
     name: Build PlatformIO Project
-    runs-on: ubuntu-latest
+    runs-on: ubuntu:24.04
 
     steps:
       # Step 1: Checkout the repository
@@ -42,7 +42,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path:
-            - .pio/build/**/*.bin
-            - .pio/build/**/*.elf
-            - .pio/build/**/*.map
+          path: .pio/build/**/*.{bin,elf,map}
