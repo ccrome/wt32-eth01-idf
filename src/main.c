@@ -13,6 +13,7 @@
 #include "relay.h"
 #include "server.h"
 #include "sensors.h"
+#include "modbus.h"
 
 #define TAG "MAIN APP"
 
@@ -70,6 +71,9 @@ void app_main(void) {
 
     // Initialize Ethernet
     init_ethernet();
+    modbus_init();
+
+    
     TaskHandle_t sensor_task;
     xTaskCreate(
         SensorTask,    // Task function
@@ -79,6 +83,17 @@ void app_main(void) {
         1,                // Priority
         &sensor_task           // Task handle (not used here)
     );
+
+
+    TaskHandle_t modbus_task;
+    xTaskCreate(
+	ModbusTask,
+	"Modbus",
+	2000,
+	NULL,
+	1,
+	&modbus_task);
+    
     // Keep FreeRTOS Task Running
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
