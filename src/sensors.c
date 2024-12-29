@@ -71,7 +71,6 @@ void sensors_init() {
     }
     ESP_LOGE(TAG, "Found %d device%s\n", _sensors.num_devices, _sensors.num_devices == 1 ? "" : "s");
 
-
     OneWireBus_ROMCode rom_code;
     owb_status status = owb_read_rom(_sensors.owb, &rom_code);
     if (status == OWB_STATUS_OK)
@@ -95,6 +94,7 @@ void sensors_init() {
     ds18b20_convert_all(_sensors.owb);
     _sensors.conversion_state = CONVERTER_CONVERTING;
     xSemaphoreGive(_sensors.lock);
+
 }
 
 float sensors_get(uint32_t sensor_id) {
@@ -132,6 +132,8 @@ void SensorTask(void *parameters) {
 		if (_sensors.errors[i] != DS18B20_OK)
 		    ++_sensors.errors_count[i];
 	    }
+	} else {
+	    vTaskDelay(1000);
 	}
     }
 }
